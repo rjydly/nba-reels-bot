@@ -1,6 +1,8 @@
 name: Hourly Publisher
+
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Permet disparar-lo manualment o amb cron-job.org
+  # Si vols activar el cron natiu de GitHub (opcional):
   # schedule:
   #   - cron: '0 * * * *'
 
@@ -8,38 +10,58 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # Imprescindible per fer push del vídeo i de les dades
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install ffmpeg and Node
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install System Dependencies (FFmpeg, Node.js, yt-dlp)
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg nodejs
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg nodejs
           sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
           sudo chmod a+rx /usr/local/bin/yt-dlp
 
-      - name: Install Python deps
-        run: pip install yt-dlp moviepy requests
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install yt-dlp moviepy requests
 
-      - name: Process Video
+      - name: Process Video (Download & Normalize)
         env:
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
           ZERNIO_API_KEY: ${{ secrets.ZERNIO_API_KEY }}
           INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
         run: python publisher.py
 
-      - name: Push Video to GitHub
+      - name: Commit and Push Video & State
         id: push_step
         run: |
-          git config --global user.name "NBA Bot"
+          git config --global user.name "NBA Publisher Bot"
           git config --global user.email "bot@nba.com"
           git add reels/ data/
-          git commit -m "New Reel ready"
-          git push
-          echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Publish to Zernio
+          # Comprovem si s'han generat canvis nous (per si la cua era buida)
+          if git diff --staged --quiet; then
+            echo "No hi ha canvis per pujar."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            git commit -m "Upload new reel and update state [skip ci]"
+            git push
+            echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish Reel via Zernio API
+        if: steps.push_step.outputs.skip != 'true'
         env:
           ZERNIO_API_KEY: ${{ secrets.ZERNIO_API_KEY }}
           INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
