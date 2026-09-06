@@ -22,10 +22,10 @@ VIDEO_URL = f"{RAW_BASE}/{VIDEO_PATH}"
 COVER_URL = f"{RAW_BASE}/{COVER_PATH}"
 
 def setup_cookies():
-    """Crea el fitxer cookies.txt si existeix el secret."""
+    """Crea el fitxer cookies.txt si el secret existeix."""
     if YOUTUBE_COOKIES:
         with open("cookies.txt", "w", encoding="utf-8") as f:
-            f.write(YOUTUBE_COOKIES)
+            f.write(YOUTUBE_COOKIES.strip())
         return True
     return False
 
@@ -51,7 +51,6 @@ def process_next_video():
     has_cookies = setup_cookies()
     success = False
 
-    # Bucle de recuperació: si un vídeo falla, passem al següent de la cua
     while queue and not success:
         item = queue.pop(0)
         print(f"📥 Intentant descarregar: {item['title']} ({item['url']})")
@@ -65,7 +64,10 @@ def process_next_video():
         ]
 
         if has_cookies:
-            cmd.extend(['--cookies', 'cookies.txt'])
+            cmd.extend([
+                '--cookies', 'cookies.txt',
+                '--extractor-args', 'youtube:player_client=web,mweb,android'
+            ])
         else:
             cmd.extend(['--extractor-args', 'youtube:player_client=ios,web_embedded'])
 
@@ -79,12 +81,10 @@ def process_next_video():
 
     if not success:
         print("❌ No s'ha pogut descarregar cap vídeo de la cua disponible.")
-        # Guardem la cua buidada
         with open(QUEUE_FILE, 'w', encoding='utf-8') as f:
             json.dump(queue, f, indent=4)
         sys.exit(1)
 
-    # Processament MoviePy
     print("⚙️ Normalitzant format vertical (9:16)...")
     clip = VideoFileClip("temp_raw.mp4")
     final_clip = fit_to_1080x1920(clip)
@@ -93,7 +93,6 @@ def process_next_video():
     clip.close()
     final_clip.close()
 
-    # Actualitzar cues locals
     with open(QUEUE_FILE, 'w', encoding='utf-8') as f:
         json.dump(queue, f, indent=4)
 
