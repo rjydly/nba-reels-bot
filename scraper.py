@@ -28,15 +28,15 @@ def get_nba_content():
 
     client = ApifyClient(APIFY_TOKEN)
 
-    # PAYLOAD AMB L'ESPECIFICACIÓ EXACTA D'APIFY
+    # PAYLOAD EXACTE D'APIFY
     run_input = {
         "searchQueries": selected_queries,
-        "maxResults": 0,               # 0 vídeos normals (estalviem quota i evitem horitzontals)
-        "maxResultsShorts": 6,         # 6 Shorts per cerca (4 cerques x 6 = ~24 Shorts)
+        "maxResults": 0,               # 0 vídeos normals
+        "maxResultsShorts": 6,         # 6 Shorts per cerca
         "maxResultStreams": 0,         # 0 directes
         "downloadSubtitles": False,
-        "aiVideoDescription": False,   # Evitem add-ons de pagament
-        "aiVideoSummary": False,       # Evitem add-ons de pagament
+        "aiVideoDescription": False,   # Evitem sobrecostos
+        "aiVideoSummary": False,
         "sortingOrder": "relevance"
     }
 
@@ -51,18 +51,29 @@ def get_nba_content():
 
     candidates = []
 
-    # Recollim els resultats del dataset
-    for item in client.dataset(run["defaultDatasetId"]).iterate_items():
-        vid_id = item.get("id")
+    # CORRECCIÓ CLAU: Accedim a default_dataset_id com a atribut de l'objecte Run
+    dataset_id = getattr(run, "default_dataset_id", None) or getattr(run, "defaultDatasetId", None)
+    if not dataset_id and isinstance(run, dict):
+        dataset_id = run.get("defaultDatasetId")
+
+    print(f"📦 Descarregant resultats del dataset: {dataset_id}...")
+
+    for item in client.dataset(dataset_id).iterate_items():
+        vid_id = item.get("id") if isinstance(item, dict) else getattr(item, "id", None)
+        item_type = item.get("type") if isinstance(item, dict) else getattr(item, "type", None)
+        item_url = item.get("url") if isinstance(item, dict) else getattr(item, "url", None)
+        title = item.get("title", "NBA Edit") if isinstance(item, dict) else getattr(item, "title", "NBA Edit")
+        views = item.get("viewCount", 0) if isinstance(item, dict) else getattr(item, "viewCount", 0)
+
         # Assegurem que sigui un Short natiu
-        is_short = item.get("type") == "shorts" or "/shorts/" in item.get("url", "")
+        is_short = item_type == "shorts" or (item_url and "/shorts/" in item_url)
 
         if vid_id and is_short and vid_id not in processed:
             candidates.append({
                 "id": vid_id,
-                "url": item.get("url") or f"https://www.youtube.com/watch?v={vid_id}",
-                "title": item.get("title", "NBA Edit"),
-                "views": item.get("viewCount", 0)
+                "url": item_url or f"https://www.youtube.com/watch?v={vid_id}",
+                "title": title,
+                "views": views or 0
             })
 
     # Eliminem duplicats si la mateixa cerca n'ha retornat algun de repetit
