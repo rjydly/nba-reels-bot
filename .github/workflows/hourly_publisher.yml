@@ -1,19 +1,27 @@
 name: Hourly Publisher
 on:
-  workflow_dispatch: # O cron cada hora
+  workflow_dispatch:
+  # schedule:
+  #   - cron: '0 * * * *'
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install Tools
+      - name: Install ffmpeg and Node
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg
-          pip install yt-dlp moviepy requests
+          sudo apt-get update && sudo apt-get install -y ffmpeg nodejs
+          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+          sudo chmod a+rx /usr/local/bin/yt-dlp
+
+      - name: Install Python deps
+        run: pip install yt-dlp moviepy requests
 
       - name: Process Video
         env:
@@ -21,19 +29,19 @@ jobs:
           INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
         run: python publisher.py
 
-      - name: Commit and Push Video
-        id: commit_step
+      - name: Push Video to GitHub
+        id: push_step
         run: |
           git config --global user.name "NBA Bot"
           git config --global user.email "bot@nba.com"
           git add reels/ data/
-          git commit -m "Publishing new reel"
+          git commit -m "New Reel ready"
           git push
           echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Trigger Zernio
+      - name: Publish to Zernio
         env:
           ZERNIO_API_KEY: ${{ secrets.ZERNIO_API_KEY }}
           INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
-          GITHUB_SHA: ${{ steps.commit_step.outputs.sha }} # Usem el nou SHA
+          GITHUB_SHA: ${{ steps.push_step.outputs.sha }}
         run: python publisher.py --publish
