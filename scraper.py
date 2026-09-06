@@ -8,56 +8,101 @@ from apify_client import ApifyClient
 QUERIES_FILE = 'queries.csv'
 QUEUE_FILE = 'data/queue.json'
 PROCESSED_FILE = 'data/processed.json'
+BACKUP_FILE = 'data/backup_reels.csv'
 APIFY_TOKEN = os.getenv("APIFY_TOKEN")
 
 def load_queries():
     if not os.path.exists(QUERIES_FILE):
-        return ["nba 4k vertical edit", "stephen curry phonk edit", "basketball aesthetic edit"]
+        return ["nba 4k vertical edit", "stephen curry phonk edit"]
     with open(QUERIES_FILE, mode='r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         return [row['query'].strip() for row in reader if row.get('query')]
 
+def sync_to_backup_csv(new_backups):
+    """Guarda els vídeos de reserva a backup_reels.csv mantenint l'ordre per views."""
+    existing_rows = []
+    seen_ids = set()
+
+    # Si el fitxer ja existeix, el llegim
+    if os.path.exists(BACKUP_FILE):
+        with open(BACKUP_FILE, mode='r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                existing_rows.append(row)
+                seen_ids.add(row.get('id'))
+
+    # Afegim només els nous que no estiguin repetits
+    for item in new_backups:
+        if item['id'] not in seen_ids:
+            existing_rows.append({
+                "id": item['id'],
+                "url": item['url'],
+                "title": item['title'],
+                "views": item['views'],
+                "status": ""  # Buit per defecte, es marcarà 'done' quan es publiqui
+            })
+            seen_ids.add(item['id'])
+
+    # Ordenem tot el CSV per reproduccions (els més vistos primer)
+    try:
+        existing_rows.sort(key=lambda x: int(x.get('views', 0)), reverse=True)
+    except:
+        pass
+
+    # Escrivim el CSV actualitzat
+    with open(BACKUP_FILE, mode='w', newline='', encoding='utf-8') as f:
+        fieldnames = ["id", "url", "title", "views", "status"]
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(existing_rows)
+
+    print(f"💾 {len(new_backups)} vídeos guardats a '{BACKUP_FILE}' (Total reserva: {len(existing_rows)})")
+
 def get_nba_content():
     if not APIFY_TOKEN:
-        print("❌ Error: Falta el secret APIFY_TOKEN a GitHub."); sys.exit(1)
+        print("❌ Error: Falta el secret APIFY_TOKEN."); sys.exit(1)
 
+    os.makedirs('data', exist_ok=True)
     all_queries = load_queries()
-    # Triem 4 cerques diferents de queries.csv
-    selected_queries = random.sample(all_queries, min(4, len(all_queries)))
-    print(f"🔍 Consultes seleccionades per a Apify: {selected_queries}")
+    
+    # Triem 2 consultes aleatòries
+    selected_queries = random.sample(all_queries, min(2, len(all_queries)))
+    print(f"🔍 Consultes per a Apify: {selected_queries}")
 
     client = ApifyClient(APIFY_TOKEN)
 
-    # PAYLOAD EXACTE D'APIFY
+    # Demanem 13 shorts per query (2 x 13 = 26 max, limitat a 25)
     run_input = {
         "searchQueries": selected_queries,
-        "maxResults": 0,               # 0 vídeos normals
-        "maxResultsShorts": 6,         # 6 Shorts per cerca
-        "maxResultStreams": 0,         # 0 directes
+        "maxResults": 0,
+        "maxResultsShorts": 13,
+        "maxResultStreams": 0,
         "downloadSubtitles": False,
-        "aiVideoDescription": False,   # Evitem sobrecostos
+        "aiVideoDescription": False,
         "aiVideoSummary": False,
         "sortingOrder": "relevance"
     }
 
-    print("🚀 Executant 'streamers/youtube-scraper' a Apify...")
-    run = client.actor("streamers/youtube-scraper").call(run_input=run_input)
+    print("🚀 Demanant exactament 25 vídeos a Apify...")
+    run = client.actor("streamers/youtube-scraper").call(
+        run_input=run_input,
+        timeout_secs=120,
+        memory_mbytes=512
+    )
 
-    os.makedirs('data', exist_ok=True)
     processed = []
     if os.path.exists(PROCESSED_FILE):
         with open(PROCESSED_FILE, 'r', encoding='utf-8') as f:
-            processed = json.load(f)
+            try:
+                processed = json.load(f)
+            except:
+                processed = []
 
-    candidates = []
-
-    # CORRECCIÓ CLAU: Accedim a default_dataset_id com a atribut de l'objecte Run
     dataset_id = getattr(run, "default_dataset_id", None) or getattr(run, "defaultDatasetId", None)
     if not dataset_id and isinstance(run, dict):
         dataset_id = run.get("defaultDatasetId")
 
-    print(f"📦 Descarregant resultats del dataset: {dataset_id}...")
-
+    candidates = []
     for item in client.dataset(dataset_id).iterate_items():
         vid_id = item.get("id") if isinstance(item, dict) else getattr(item, "id", None)
         item_type = item.get("type") if isinstance(item, dict) else getattr(item, "type", None)
@@ -65,7 +110,6 @@ def get_nba_content():
         title = item.get("title", "NBA Edit") if isinstance(item, dict) else getattr(item, "title", "NBA Edit")
         views = item.get("viewCount", 0) if isinstance(item, dict) else getattr(item, "viewCount", 0)
 
-        # Assegurem que sigui un Short natiu
         is_short = item_type == "shorts" or (item_url and "/shorts/" in item_url)
 
         if vid_id and is_short and vid_id not in processed:
@@ -73,28 +117,35 @@ def get_nba_content():
                 "id": vid_id,
                 "url": item_url or f"https://www.youtube.com/watch?v={vid_id}",
                 "title": title,
-                "views": views or 0
+                "views": int(views or 0)
             })
 
-    # Eliminem duplicats si la mateixa cerca n'ha retornat algun de repetit
+    # Eliminem possibles duplicats
     unique_candidates = []
-    seen_ids = set()
+    seen = set()
     for c in candidates:
-        if c['id'] not in seen_ids:
-            seen_ids.add(c['id'])
+        if c['id'] not in seen:
+            seen.add(c['id'])
             unique_candidates.append(c)
 
-    # Ordenem pels més vistos (els més virals primer)
-    unique_candidates.sort(key=lambda x: x['views'], reverse=True)
+    # Limitem el conjunt a exactament 25 vídeos com a màxim
+    total_batch = unique_candidates[:25]
 
-    final_queue = unique_candidates[:20]
+    # Ordenem els 25 per viralitat (reproduccions)
+    total_batch.sort(key=lambda x: x['views'], reverse=True)
 
+    # 1. Els TOP 20 van a la cua del dia
+    today_queue = total_batch[:20]
     with open(QUEUE_FILE, 'w', encoding='utf-8') as f:
-        json.dump(final_queue, f, indent=4)
+        json.dump(today_queue, f, indent=4)
 
-    print(f"\n🎯 CUA GENERADA AMB ÈXIT: {len(final_queue)} Shorts verticals purs.")
-    for idx, v in enumerate(final_queue, 1):
-        print(f"  {idx}. {v['title']} (👁️ {v['views']} views)")
+    # 2. Els 5 restants van al fitxer de reserva backup_reels.csv
+    backup_reels = total_batch[20:]
+    if backup_reels:
+        sync_to_backup_csv(backup_reels)
+
+    print(f"\n🎯 CUA DEL DIA: {len(today_queue)} vídeos desats a '{QUEUE_FILE}'.")
+    print(f"📦 RESERVA: {len(backup_reels)} vídeos enviats a '{BACKUP_FILE}'.")
 
 if __name__ == "__main__":
     get_nba_content()
