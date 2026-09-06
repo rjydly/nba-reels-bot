@@ -4,6 +4,7 @@ import time
 import json
 import requests
 import subprocess
+from PIL import Image
 from moviepy import VideoFileClip, ColorClip, CompositeVideoClip
 
 GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY")
@@ -22,7 +23,6 @@ VIDEO_URL = f"{RAW_BASE}/{VIDEO_PATH}"
 COVER_URL = f"{RAW_BASE}/{COVER_PATH}"
 
 def setup_cookies():
-    """Crea el fitxer cookies.txt si el secret existeix."""
     if YOUTUBE_COOKIES:
         with open("cookies.txt", "w", encoding="utf-8") as f:
             f.write(YOUTUBE_COOKIES.strip())
@@ -89,7 +89,14 @@ def process_next_video():
     clip = VideoFileClip("temp_raw.mp4")
     final_clip = fit_to_1080x1920(clip)
     final_clip.write_videofile(VIDEO_PATH, bitrate="3500k", codec="libx264", audio_codec="aac", fps=30)
-    final_clip.save_frame(COVER_PATH, t=0.5)
+    
+    # Solució al RGBA: Convertim a RGB abans de guardar en JPEG
+    frame = final_clip.get_frame(0.5)
+    img = Image.fromarray(frame)
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    img.save(COVER_PATH, format="JPEG", quality=95)
+
     clip.close()
     final_clip.close()
 
