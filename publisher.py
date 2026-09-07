@@ -8,6 +8,13 @@ from PIL import Image, ImageFilter
 import numpy as np
 from moviepy import VideoFileClip, CompositeVideoClip
 
+# ==============================================================================
+# 📝 CONFIGURACIÓ DE LA PUBLICACIÓ (EDITA AQUÍ EL TEU TÍTOL I HASHTAGS)
+# ==============================================================================
+INSTAGRAM_CAPTION = "Hoops daily 🔥🏀 #nba #basketball #euroleague #edits #nbaedits"
+# ==============================================================================
+
+# Variables del sistema i rutes
 GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY")
 GITHUB_SHA = os.getenv("GITHUB_SHA")
 ZERNIO_API_KEY = os.getenv("ZERNIO_API_KEY")
@@ -34,12 +41,12 @@ def fit_to_1080x1920(clip):
     w, h = clip.size
     ratio = w / h
 
-    # 1. Si ja és 9:16 pur (o quasi), només escalem directament
+    # 1. Si ja és 9:16 (o quasi), l'escalem directament
     if ratio <= 0.65:
         return clip.resized(width=1080, height=1920)
 
-    # 2. Si és quadrat (1:1) o 4:5, apliquem blur lleuger als marges
-    print("🎨 Vídeo quadrat/mig vertical (1:1). Aplicant fons desenfocat suau...")
+    # 2. Si és quadrat (1:1) o 4:5, apliquem blurred background suau
+    print("🎨 Vídeo quadrat o 4:5. Aplicant fons desenfocat suau...")
     scale = min(1080 / w, 1920 / h)
     new_w, new_h = int(w * scale), int(h * scale)
     new_w = new_w if new_w % 2 == 0 else new_w - 1
@@ -93,14 +100,13 @@ def process_next_video():
         try:
             subprocess.run(cmd, check=True)
             
-            # --- COMPROVACIÓ D'ASPECT RATIO ---
             probe_clip = VideoFileClip("temp_raw.mp4")
             w, h = probe_clip.size
             ratio = w / h
 
-            # Si és més ample que alt (horitzontal / 16:9), EL REBUTGEM IMMEDIATAMENT!
+            # Rebuig de seguretat per si de cas és horitzontal
             if ratio > 1.05:
-                print(f"🚫 VÍDEO DESCARTAT: És horitzontal ({w}x{h}, ràtio {ratio:.2f}). No volem vídeos apaïsats!")
+                print(f"🚫 VÍDEO DESCARTAT: És horitzontal ({w}x{h}).")
                 probe_clip.close()
                 if os.path.exists("temp_raw.mp4"):
                     os.remove("temp_raw.mp4")
@@ -115,7 +121,7 @@ def process_next_video():
             time.sleep(2)
 
     if not success:
-        print("❌ Cap vídeo vertical vàlid trobat a la cua.")
+        print("❌ Cap vídeo vàlid trobat a la cua.")
         with open(QUEUE_FILE, 'w', encoding='utf-8') as f:
             json.dump(queue, f, indent=4)
         sys.exit(1)
@@ -135,26 +141,35 @@ def process_next_video():
     with open(PROCESSED_FILE, 'w', encoding='utf-8') as f:
         json.dump(processed, f, indent=4)
 
-    print(f"✅ Reel 100% vertical generat: {VIDEO_PATH}")
+    print(f"✅ Reel llest per a publicar a '{VIDEO_PATH}'.")
+
+def wait_until_public(url, retries=15):
+    print(f"🔍 Verificant CDN pública: {url}")
+    for i in range(retries):
+        try:
+            r = requests.head(url, timeout=10)
+            if r.status_code == 200:
+                print("✅ Fitxer disponible!")
+                return True
+        except:
+            pass
+        print(f"  [{i+1}/{retries}] Esperant CDN de GitHub (10s)...")
+        time.sleep(10)
+    return False
 
 def publish_to_zernio():
     if not ZERNIO_API_KEY:
-        print("⚠️ Mode Test: Vídeo URL:", VIDEO_URL)
-        print("⚠️ Mode Test: Portada URL:", COVER_URL)
+        print("\n⚠️ MODE TEST:")
+        print(f"📝 Títol que es publicaria: {INSTAGRAM_CAPTION}")
+        print(f"🔗 Vídeo URL: {VIDEO_URL}")
+        print(f"🖼️ Cover URL: {COVER_URL}")
         return
 
-    for i in range(15):
-        try:
-            if requests.head(VIDEO_URL, timeout=10).status_code == 200:
-                print("✅ Fitxer disponible a la CDN!")
-                break
-        except:
-            pass
-        print(f"Esperant CDN de GitHub (10s)...")
-        time.sleep(10)
+    if not wait_until_public(VIDEO_URL) or not wait_until_public(COVER_URL):
+        print("❌ Error: Els fitxers no estan disponibles a la CDN."); sys.exit(1)
 
     payload = {
-        "content": "Elite NBA Edit 🔥🏀 #nbaedits #basketball #hoops #nba #edits",
+        "content": INSTAGRAM_CAPTION,  # Utilitzem la variable definida a dalt
         "mediaItems": [{"type": "video", "url": VIDEO_URL}],
         "platforms": [{
             "platform": "instagram",
@@ -166,10 +181,16 @@ def publish_to_zernio():
         }],
         "publishNow": True
     }
+
+    print("🚀 Publicant a Instagram via Zernio...")
     r = requests.post("https://zernio.com/api/v1/posts",
                      headers={"Authorization": f"Bearer {ZERNIO_API_KEY}", "Content-Type": "application/json"},
                      json=payload)
     print(f"Zernio Status: {r.status_code}")
+    if r.status_code >= 300:
+        print("Resposta Zernio:", r.text)
+    else:
+        print(f"✅ REEL PUBLICAT! ID: {r.json().get('post', {}).get('_id')}")
 
 if __name__ == "__main__":
     if "--publish" in sys.argv:
