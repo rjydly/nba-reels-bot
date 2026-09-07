@@ -11,7 +11,7 @@ from moviepy import VideoFileClip, CompositeVideoClip
 # ==============================================================================
 # 📝 CONFIGURACIÓ DE LA PUBLICACIÓ (EDITA AQUÍ EL TEU TÍTOL I HASHTAGS)
 # ==============================================================================
-INSTAGRAM_CAPTION = "Hoops daily 🔥🏀 #nba #basketball #euroleague #edits #nbaedits"
+INSTAGRAM_CAPTION = "Tonight, V stepped into the crowd, taking in live performances at Vogue World: Hollywood. Known for his own standout fashion moments, he kept it effortlessly stylish in a look worthy of the runway."
 # ==============================================================================
 
 # Variables del sistema i rutes
