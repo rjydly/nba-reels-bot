@@ -1,9 +1,7 @@
 name: Daily Scraper
 
 on:
-  workflow_dispatch: # Per provar-lo manualment quan vulguis
-  schedule:
-    - cron: '0 1 * * *' # S'executa a la 1:00 UTC cada dia
+
 
 jobs:
   scrape:
