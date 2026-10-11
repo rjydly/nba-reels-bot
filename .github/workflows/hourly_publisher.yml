@@ -1,9 +1,7 @@
 name: Hourly Publisher
 
 on:
-  workflow_dispatch: # Disparador manual o mitjançant cron-job.org
-  # schedule:
-  #   - cron: '0 * * * *' # Descomenta aquesta línia si vols que s'executi cada hora automàticament per GitHub
+
 
 jobs:
   publish:
